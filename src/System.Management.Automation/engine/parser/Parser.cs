@@ -7889,10 +7889,10 @@ namespace System.Management.Automation.Language
             // G  argument-label-expression:
             // G      simple-name    ':'
 
-            HashSet<string> existingArguments = new HashSet<string>();
             List<ExpressionAst> arguments = new List<ExpressionAst>();
             Token comma = null;
             Token rParen = null;
+            Token lastValidToken = null;
 
             bool oldDisableCommaOperator = _disableCommaOperator;
             bool reportedError = false;
@@ -7919,8 +7919,11 @@ namespace System.Management.Automation.Language
                                 argumentName.Extent.ToString(),
                                 colon.Text);
                             reportedError = true;
+                            lastValidToken = argNameToken;
                             break;
                         }
+
+                        lastValidToken = colon;
                     }
 
                     ExpressionAst argument = ExpressionRule();
@@ -7930,23 +7933,10 @@ namespace System.Management.Automation.Language
 
                         if (argumentName is not null)
                         {
-                            if (comma is null)
-                            {
-                                comma = NextToken();
-                                UngetToken(comma);
-                            }
-
-                            string nextTokenText = comma.Text;
-                            if (nextTokenText.Length == 1 && char.IsControl(nextTokenText[0]))
-                            {
-                                nextTokenText = string.Format("\\u{0:x4}", (short)nextTokenText[0]);
-                            }
-
-                            ReportIncompleteInput(After(argumentName.Extent),
-                                nameof(ParserStrings.MissingArgumentAfterLabel),
-                                ParserStrings.MissingArgumentAfterLabel,
-                                argumentName.Value,
-                                nextTokenText);
+                            ReportIncompleteInput(After(lastValidToken),
+                                nameof(ParserStrings.MissingExpressionAfterToken),
+                                ParserStrings.MissingExpressionAfterToken,
+                                TokenKind.Colon.Text());
                             reportedError = true;
                         }
                         else if (comma != null)
@@ -7963,31 +7953,11 @@ namespace System.Management.Automation.Language
 
                     if (argumentName is null)
                     {
-                        if (existingArguments.Count > 0)
-                        {
-                            // ErrorRecovery: sync at closing paren or newline.
-
-                            ReportError(argument.Extent,
-                                nameof(ParserStrings.UnnamedArgumentAfterNamed),
-                                ParserStrings.UnnamedArgumentAfterNamed);
-                            reportedError = true;
-                            break;
-                        }
-
                         arguments.Add(argument);
                     }
                     else
                     {
                         IScriptExtent entryExtent = ExtentOf(argumentName, argument);
-                        if (!existingArguments.Add(argumentName.Value))
-                        {
-                            ReportError(entryExtent,
-                                nameof(ParserStrings.DuplicateArgumentLabel),
-                                ParserStrings.DuplicateArgumentLabel,
-                                argumentName.Value);
-                            reportedError = true;
-                            break;
-                        }
                         arguments.Add(new LabeledExpressionAst(entryExtent, argumentName, argument));
                     }
 
@@ -7996,9 +7966,12 @@ namespace System.Management.Automation.Language
                     if (comma.Kind != TokenKind.Comma)
                     {
                         UngetToken(comma);
+                        lastValidToken = null;
                         comma = null;
                         break;
                     }
+
+                    lastValidToken = comma;
                 }
 
                 SkipNewlines();
@@ -8023,7 +7996,7 @@ namespace System.Management.Automation.Language
                 _disableCommaOperator = oldDisableCommaOperator;
             }
 
-            lastExtent = ExtentFromFirstOf(rParen, comma, arguments.LastOrDefault(), lParen);
+            lastExtent = ExtentFromFirstOf(rParen, lastValidToken, arguments.LastOrDefault(), lParen);
             return arguments;
         }
 
