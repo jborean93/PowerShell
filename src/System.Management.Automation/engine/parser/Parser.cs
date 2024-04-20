@@ -7890,7 +7890,6 @@ namespace System.Management.Automation.Language
             // G      simple-name    ':'
 
             List<ExpressionAst> arguments = new List<ExpressionAst>();
-            Token comma = null;
             Token rParen = null;
             Token lastValidToken = null;
 
@@ -7930,21 +7929,12 @@ namespace System.Management.Automation.Language
                     if (argument == null)
                     {
                         // ErrorRecovery: sync at closing paren or newline.
-
-                        if (argumentName is not null)
+                        if (lastValidToken is not null)
                         {
                             ReportIncompleteInput(After(lastValidToken),
                                 nameof(ParserStrings.MissingExpressionAfterToken),
                                 ParserStrings.MissingExpressionAfterToken,
-                                TokenKind.Colon.Text());
-                            reportedError = true;
-                        }
-                        else if (comma != null)
-                        {
-                            ReportIncompleteInput(After(comma),
-                                nameof(ParserStrings.MissingExpressionAfterToken),
-                                ParserStrings.MissingExpressionAfterToken,
-                                TokenKind.Comma.Text());
+                                lastValidToken.Text);
                             reportedError = true;
                         }
 
@@ -7962,16 +7952,13 @@ namespace System.Management.Automation.Language
                     }
 
                     SkipNewlines();
-                    comma = NextToken();
-                    if (comma.Kind != TokenKind.Comma)
+                    lastValidToken = NextToken();
+                    if (lastValidToken.Kind != TokenKind.Comma)
                     {
-                        UngetToken(comma);
+                        UngetToken(lastValidToken);
                         lastValidToken = null;
-                        comma = null;
                         break;
                     }
-
-                    lastValidToken = comma;
                 }
 
                 SkipNewlines();
