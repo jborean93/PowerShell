@@ -3697,21 +3697,7 @@ namespace System.Management.Automation
             try
             {
                 var contentName = "PowerShellMemberInvocation";
-                var argsBuilder = new Text.StringBuilder();
-
-                for (int i = 0; i < args.Length; i++)
-                {
-                    string value = ArgumentToString(args[i]);
-
-                    if (i > 0)
-                    {
-                        argsBuilder.Append(", ");
-                    }
-
-                    argsBuilder.Append($"<{value}>");
-                }
-
-                string content = $"<{targetName}>.{name}({argsBuilder})";
+                string content = GetMemberInvocationStringWithArgs(targetName, name, args);
 
                 if (DumpLogAMSIContent.Value)
                 {
@@ -3741,6 +3727,53 @@ namespace System.Management.Automation
                     Console.WriteLine($"!!! Amsi notification report exception: {ex} !!!");
                 }
             }
+        }
+        
+        private static string GetMemberInvocationStringWithArgs(string targetName, string name, object[] args)
+        {
+            if (args.Length == 0)
+            {
+                return $"<{targetName}>.{name}()";
+            }
+
+            int stringLength = targetName.Length + name.Length + 5;
+            string[] stringArgs = new string[args.Length];
+            for (int i = 0; i < args.Length; i++)
+            {
+                stringArgs[i] = ArgumentToString(args[i]);
+                stringLength += stringArgs[i].Length + 2;
+                if (i < args.Length - 1)
+                {
+                    stringLength += 2;
+                }
+            }
+            
+            return string.Create(stringLength, (targetName, name, stringArgs), static (chars, state) =>
+            {
+                int i = 0;
+                chars[i++] = '<';
+                state.targetName.AsSpan().CopyTo(chars[i..]);
+                i += state.targetName.Length;
+                chars[i++] = '>';
+                chars[i++] = '.';
+                state.name.AsSpan().CopyTo(chars[i..]);
+                i += state.name.Length;
+
+                chars[i++] = '(';
+                for (int j = 0; j < state.stringArgs.Length; j++)
+                {
+                    chars[i++] = '<';
+                    state.stringArgs[j].AsSpan().CopyTo(chars[i..]);
+                    i += state.stringArgs[j].Length;
+                    chars[i++] = '>';
+                    if (j < state.stringArgs.Length - 1)
+                    {
+                        chars[i++] = ',';
+                        chars[i++] = ' ';
+                    }
+                }
+                chars[i++] = ')';
+            });
         }
     }
 }
