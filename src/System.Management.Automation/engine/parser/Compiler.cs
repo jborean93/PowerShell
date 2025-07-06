@@ -4173,17 +4173,20 @@ namespace System.Management.Automation.Language
             var commandElements = commandAst.CommandElements;
             Expression[] elementExprs = new Expression[commandElements.Count];
 
+            bool nextIsSplat = false;
+            int elementCount = 0;
             for (int i = 0; i < commandElements.Count; ++i)
             {
                 var element = commandElements[i];
                 if (element is CommandParameterAst)
                 {
-                    elementExprs[i] = Compile(element);
+                    // FIXME: Throw exception after -@/nextIsSplat.
+                    elementExprs[elementCount] = Compile(element);
                 }
                 else
                 {
                     var splatTest = element;
-                    bool splatted = false;
+                    bool splatted = nextIsSplat;
 
                     UsingExpressionAst usingExpression = element as UsingExpressionAst;
                     if (usingExpression != null)
@@ -4194,15 +4197,38 @@ namespace System.Management.Automation.Language
                     VariableExpressionAst variableExpression = splatTest as VariableExpressionAst;
                     if (variableExpression != null)
                     {
+                        // FIXME: Throw exception after -@/nextIsSplat.
                         splatted = variableExpression.Splatted;
                     }
 
-                    elementExprs[i] = Expression.Call(
+                    if (element is StringConstantExpressionAst stringConst &&
+                        stringConst.StringConstantType == StringConstantType.BareWord &&
+                        (string)stringConst.SafeGetValue() == "-@")
+                    {
+                        nextIsSplat = true;
+                        continue;
+                    }
+
+                    elementExprs[elementCount] = Expression.Call(
                         CachedReflectionInfo.CommandParameterInternal_CreateArgument,
                         Expression.Convert(GetCommandArgumentExpression(element), typeof(object)),
                         Expression.Constant(element),
                         ExpressionCache.Constant(splatted));
                 }
+
+                nextIsSplat = false;
+                elementCount++;
+            }
+
+            if (nextIsSplat)
+            {
+                // FIXME: Get this to throw properly.
+                return Compiler.ThrowRuntimeError("MissingSplatValue", ParserStrings.MissingSplatValue);
+            }
+
+            if (elementCount < elementExprs.Length)
+            {
+                Array.Resize(ref elementExprs, elementCount);
             }
 
             Expression result = Expression.NewArrayInit(typeof(CommandParameterInternal), elementExprs);

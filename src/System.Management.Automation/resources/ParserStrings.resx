@@ -678,6 +678,9 @@ The correct form is: foreach ($a in $b) {...}</value>
   <data name="StrictModeFunctionCallWithParens" xml:space="preserve">
     <value>The function or command was called as if it were a method. Parameters should be separated by spaces. For information about parameters, see the about_Parameters Help topic.</value>
   </data>
+  <data name="MissingSplatValue" xml:space="preserve">
+    <value>Missing value after the splat parameter -@.</value>
+  </data>
   <data name="MissingTryStatementBlock" xml:space="preserve">
     <value>The Try statement is missing its statement block.</value>
   </data>
