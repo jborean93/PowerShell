@@ -352,7 +352,7 @@ public static class NativeMethods
                     throw
                 }
 
-                # If a ScriptBlock job was invoked, try out best to run it
+                # If a ScriptBlock job was invoked, try our best to run it
                 # until the end so we can get more context behind why it failed.
 
                 if ($job.State -eq 'Running') {
