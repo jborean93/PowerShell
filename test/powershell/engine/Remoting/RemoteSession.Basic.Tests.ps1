@@ -382,7 +382,7 @@ Describe "Remoting loopback tests" -Tags @('CI', 'RequireAdminOnWindows') {
         $result | Should -Be 100
     }
 
-    It 'Ignores invalid $using variables' {
+    It 'Invalid property on $using does not affect other $using variables' {
         $Var1 = "Hello"
         $Var2 = $null
         $Var3 = "World"
