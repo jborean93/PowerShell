@@ -102,6 +102,62 @@ namespace PSTests.Sequential
             }
         }
 
+        [Fact]
+        public void TestRunspaceClosedByStateChangedHandlerDuringOpen()
+        {
+            using Runspace runspace = RunspaceFactory.CreateRunspace();
+            runspace.StateChanged += (sender, e) =>
+            {
+                if (e.RunspaceStateInfo.State == RunspaceState.Opened)
+                {
+                    runspace.Close();
+                }
+            };
+
+            // The open stops once the handler has closed the runspace rather than continuing
+            // to initialize it.
+            runspace.Open();
+
+            Assert.Equal(RunspaceState.Closed, runspace.RunspaceStateInfo.State);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void TestRunspaceCloseFromOpeningStateChangedHandlerFails(bool syncOpen)
+        {
+            using Runspace runspace = RunspaceFactory.CreateRunspace();
+            Exception closeError = null;
+            runspace.StateChanged += (sender, e) =>
+            {
+                if (e.RunspaceStateInfo.State == RunspaceState.Opening)
+                {
+                    // StateChanged swallows exceptions so capture it for the test to assert.
+                    try
+                    {
+                        runspace.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        closeError = ex;
+                    }
+                }
+            };
+
+            // The Opening event is raised on this thread for both Open() and OpenAsync(), so the
+            // Close() fails rather than waiting for an open that can't start until it returns.
+            if (syncOpen)
+            {
+                runspace.Open();
+            }
+            else
+            {
+                runspace.OpenAsync();
+            }
+
+            Assert.IsType<InvalidRunspaceStateException>(closeError);
+        }
+
         [SkippableFact]
         public void TestAppDomainProcessExitEvenHandlerNotLeaking()
         {

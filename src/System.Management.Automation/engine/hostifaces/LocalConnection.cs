@@ -628,12 +628,34 @@ namespace System.Management.Automation.Runspaces
         private void DoOpenHelper()
         {
             Dbg.Assert(InitialSessionState != null, "InitialSessionState should not be null");
-            // NTRAID#Windows Out Of Band Releases-915851-2005/09/13
-            if (_disposed)
-            {
-                throw PSTraceSource.NewObjectDisposedException("runspace");
-            }
 
+            OpeningThreadId = Environment.CurrentManagedThreadId;
+            try
+            {
+                // NTRAID#Windows Out Of Band Releases-915851-2005/09/13
+                if (_disposed)
+                {
+                    // Dispose() was called before an async open started. Fail the open so the
+                    // Close() from Dispose() waiting on RunspaceOpening sees Broken and returns.
+                    ObjectDisposedException disposedException = PSTraceSource.NewObjectDisposedException("runspace");
+                    SetRunspaceState(RunspaceState.Broken, disposedException);
+                    RaiseRunspaceStateEvents();
+                    throw disposedException;
+                }
+
+                DoOpenHelperCore();
+            }
+            finally
+            {
+                // Signalled once the open has fully completed, including the InitialSessionState
+                // startup scripts and module imports, or has failed. A Close() from another thread
+                // waits on this so it cannot run concurrently with the open.
+                RunspaceOpening.Set();
+            }
+        }
+
+        private void DoOpenHelperCore()
+        {
             bool startLifeCycleEventWritten = false;
             s_runspaceInitTracer.WriteLine("begin open runspace");
             try
@@ -684,15 +706,40 @@ namespace System.Management.Automation.Runspaces
                 throw;
             }
 
-            SetRunspaceState(RunspaceState.Opened);
-            RunspaceOpening.Set();
+            lock (SyncRoot)
+            {
+                // Close() was called while opening, skip the Opened state so subscribers only see
+                // the close. Checked in the lock Close() uses so it can't be cancelled in between.
+                if (IsOpenCancelled)
+                {
+                    s_runspaceInitTracer.WriteLine("runspace open cancelled");
+                    return;
+                }
+
+                SetRunspaceState(RunspaceState.Opened);
+            }
 
             // Raise the event
             RaiseRunspaceStateEvents();
             s_runspaceInitTracer.WriteLine("runspace opened successfully");
 
+            // A StateChanged handler on this thread may have closed the runspace, or Close() may
+            // have been called from another thread, so there is nothing left to initialize.
+            if (IsOpenCancelled || RunspaceState != RunspaceState.Opened)
+            {
+                s_runspaceInitTracer.WriteLine("runspace open cancelled");
+                return;
+            }
+
             // Now do initial state configuration that requires an active runspace
             Exception initError = InitialSessionState.BindRunspace(this, s_runspaceInitTracer);
+            if (IsOpenCancelled || RunspaceState != RunspaceState.Opened)
+            {
+                // Errors from the startup work stopped by Close() are expected and not an open failure.
+                s_runspaceInitTracer.WriteLine("runspace open cancelled");
+                return;
+            }
+
             if (initError != null)
             {
                 // Log engine health event

@@ -282,8 +282,18 @@ namespace System.Management.Automation.Runspaces
                 SetRunspaceState(RunspaceState.Opening);
             }
 
+            // A Close() from an Opening StateChanged handler must not wait for an open that can
+            // only start once the handler returns.
+            OpeningThreadId = Environment.CurrentManagedThreadId;
+
             // Raise event outside the lock
             RaiseRunspaceStateEvents();
+
+            if (!syncCall)
+            {
+                // The async open thread records itself, until then a Close() from this thread waits.
+                OpeningThreadId = 0;
+            }
 
             OpenHelper(syncCall);
             if (etwEnabled)
@@ -373,19 +383,35 @@ namespace System.Management.Automation.Runspaces
 
                     return;
                 }
-                else if (RunspaceState == RunspaceState.Opening)
+                else if ((RunspaceState == RunspaceState.Opening || (RunspaceState == RunspaceState.Opened && !RunspaceOpening.IsSet)) &&
+                    Environment.CurrentManagedThreadId != OpeningThreadId)
                 {
-                    // Wait till the runspace is opened - This is set in DoOpenHelper()
-                    // Release the lock before we wait
+                    // The open is still in progress on another thread, which includes the
+                    // InitialSessionState startup scripts and module imports that run while the
+                    // state is Opened. Cancel the remaining open work and stop any running startup
+                    // pipeline, then wait for the open to stop (RunspaceOpening is set in
+                    // DoOpenHelper()) so the runspace is not torn down underneath it. The opening
+                    // thread itself, e.g. a StateChanged handler, does not wait as it would deadlock.
+                    _openCancelled = true;
+
+                    // Release the lock before we stop pipelines and wait
                     Monitor.Exit(SyncRoot);
                     try
                     {
+                        StopPipelines();
                         RunspaceOpening.Wait();
                     }
                     finally
                     {
                         // Acquire the lock before we carry on with the rest operations
                         Monitor.Enter(SyncRoot);
+                    }
+
+                    // The open may have failed while waiting.
+                    if (RunspaceState == RunspaceState.Closed ||
+                        RunspaceState == RunspaceState.Broken)
+                    {
+                        return;
                     }
                 }
 
@@ -400,7 +426,9 @@ namespace System.Management.Automation.Runspaces
                 }
                 else
                 {
-                    if (RunspaceState != RunspaceState.Opened)
+                    // An open cancelled before it reached Opened is closed directly from Opening.
+                    if (RunspaceState != RunspaceState.Opened &&
+                        !(RunspaceState == RunspaceState.Opening && _openCancelled))
                     {
                         InvalidRunspaceStateException e =
                             new InvalidRunspaceStateException
@@ -713,8 +741,21 @@ namespace System.Management.Automation.Runspaces
             public RunspaceAvailability NewRunspaceAvailability;
         }
 
-        // This is to notify once runspace has been opened (RunspaceState.Opened)
+        // This is to notify once the runspace open has completed or failed. It is set after the
+        // InitialSessionState startup scripts and module imports have run.
         internal ManualResetEventSlim RunspaceOpening = new ManualResetEventSlim(false);
+
+        // The thread opening the runspace, used to avoid a Close() on that thread waiting for itself.
+        internal int OpeningThreadId { get; set; }
+
+        // Set when Close() is called from another thread while the open is in progress.
+        private volatile bool _openCancelled;
+
+        /// <summary>
+        /// Gets a value indicating whether Close() was called while the runspace was opening, in
+        /// which case the remaining open work should be skipped.
+        /// </summary>
+        internal bool IsOpenCancelled => _openCancelled;
 
         /// <summary>
         /// Set the new runspace state.

@@ -2517,6 +2517,11 @@ namespace System.Management.Automation.Runspaces
             // Setting the module to null fixes that.
             initializedRunspace.ExecutionContext.EngineSessionState.Module = null;
 
+            if (IsOpenCancelled(initializedRunspace))
+            {
+                return null;
+            }
+
             if (ModuleSpecificationsToImport.Count > 0 || unresolvedCmdsToExpose.Count > 0)
             {
                 Exception moduleImportException = ProcessModulesToImport(initializedRunspace, ModuleSpecificationsToImport, string.Empty, GetPublicCommands(), unresolvedCmdsToExpose);
@@ -2527,6 +2532,11 @@ namespace System.Management.Automation.Runspaces
                         moduleImportException);
                     return moduleImportException;
                 }
+            }
+
+            if (IsOpenCancelled(initializedRunspace))
+            {
+                return null;
             }
 
             // If we still have unresolved commands after importing specified modules, then try finding associated module for
@@ -2567,6 +2577,11 @@ namespace System.Management.Automation.Runspaces
                 }
             }
 
+            if (IsOpenCancelled(initializedRunspace))
+            {
+                return null;
+            }
+
             // Process startup scripts
             if (StartupScripts.Count > 0)
             {
@@ -2580,6 +2595,11 @@ namespace System.Management.Automation.Runspaces
                     Exception result = PSTraceSource.NewInvalidOperationException(startupScriptException, RemotingErrorIdStrings.StartupScriptThrewTerminatingError, startupScriptException.Message);
                     return result;
                 }
+            }
+
+            if (IsOpenCancelled(initializedRunspace))
+            {
+                return null;
             }
 
             // Start transcribing
@@ -2599,6 +2619,13 @@ namespace System.Management.Automation.Runspaces
 
             return null;
         }
+
+        /// <summary>
+        /// Returns true if Close() was called while the runspace was opening, so the remaining
+        /// initialization should be skipped.
+        /// </summary>
+        private static bool IsOpenCancelled(Runspace initializedRunspace)
+            => initializedRunspace is RunspaceBase runspace && runspace.IsOpenCancelled;
 
         private static string[] GetModulesForUnResolvedCommands(IEnumerable<string> unresolvedCommands, ExecutionContext context)
         {
@@ -2872,6 +2899,11 @@ namespace System.Management.Automation.Runspaces
         {
             foreach (string startupScript in StartupScripts)
             {
+                if (IsOpenCancelled(initializedRunspace))
+                {
+                    return null;
+                }
+
                 using (PowerShell psToInvoke = PowerShell.Create())
                 {
                     psToInvoke.AddCommand(new Command(startupScript, false, false));
